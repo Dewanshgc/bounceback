@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bounceback AI Schedule Maker</title>
+  <style>
+    :root{--bg:#070b16;--text:#e5e7eb;--card:rgba(255,255,255,.08);--border:rgba(255,255,255,.2);--accent:#8b5cf6;--ok:#22c55e;--warn:#f97316}
+    body.light{--bg:#eef2ff;--text:#111827;--card:rgba(255,255,255,.7);--border:rgba(15,23,42,.12)}
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui;background:radial-gradient(circle at top right,#2563eb 0,var(--bg) 45%);color:var(--text)}
+    .app{display:grid;grid-template-columns:230px 1fr;min-height:100vh} aside{padding:1rem;border-right:1px solid var(--border);backdrop-filter:blur(12px)}
+    aside h1{margin:.4rem 0 1rem} nav{display:grid;gap:.5rem} button,input,select,textarea{background:var(--card);color:var(--text);border:1px solid var(--border);padding:.55rem .75rem;border-radius:10px}
+    nav button{text-align:left} main{padding:1rem;display:grid;gap:1rem} .glass{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:.9rem;backdrop-filter:blur(10px);box-shadow:0 10px 30px rgba(0,0,0,.2)}
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.7rem}.metric b{font-size:1.5rem;display:block;margin-top:.2rem}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.8rem}.chart{height:210px;width:100%}
+    .row{display:flex;justify-content:space-between;gap:.6rem;align-items:center;flex-wrap:wrap}.heatmap{display:grid;grid-template-columns:repeat(35,1fr);gap:3px;margin:.8rem 0}.heatmap span{aspect-ratio:1;background:#1f2937;border-radius:4px}
+    .l1{background:#06b6d4!important}.l2{background:#0ea5e9!important}.l3{background:#6366f1!important}.l4{background:#8b5cf6!important}
+    .tasks{list-style:none;padding:0;margin:0;display:grid;gap:.5rem}.tasks li{display:flex;justify-content:space-between;gap:.8rem;border:1px solid var(--border);padding:.6rem;border-radius:12px;align-items:center}
+    .fab{position:fixed;right:1rem;bottom:1rem;width:56px;height:56px;border-radius:50%;font-size:24px;background:linear-gradient(135deg,#8b5cf6,#06b6d4)}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;place-items:center}.modal.open{display:grid}.panel{width:min(540px,92vw);display:grid;gap:.5rem}
+    .panel .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}.tag{padding:.2rem .45rem;border-radius:999px;border:1px solid var(--border);font-size:.75rem}
+    @media(max-width:1000px){.app{grid-template-columns:1fr}.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="app" aria-label="Schedule dashboard">
+  <aside>
+    <h1>Bounceback</h1>
+    <nav><button>Dashboard</button><button>Calendar</button><button>Goals</button><button>Analytics</button><button>Settings</button></nav>
+    <button id="themeBtn" aria-label="Toggle theme">Toggle Light/Dark</button>
+  </aside>
+  <main>
+    <section class="cards" id="metrics"></section>
+    <section class="grid">
+      <article class="glass"><h3>Accuracy Trend</h3><canvas id="lineChart" class="chart" aria-label="line chart"></canvas></article>
+      <article class="glass"><h3>Completed vs Pending</h3><canvas id="pieChart" class="chart" aria-label="pie chart"></canvas></article>
+      <article class="glass"><h3>Tasks Completed per Day</h3><canvas id="barChart" class="chart" aria-label="bar chart"></canvas></article>
+      <article class="glass" id="insights"></article>
+    </section>
+    <section class="glass">
+      <div class="row"><h3>Calendar & Task System</h3><div><select id="filter"><option value="all">All</option><option value="completed">Completed</option><option value="pending">Pending</option><option>Work</option><option>Health</option><option>Study</option><option>Personal</option></select><select id="view"><option value="day">Daily</option><option value="week">Weekly</option><option value="month" selected>Monthly</option><option value="year">Yearly</option></select></div></div>
+      <div class="heatmap" id="heatmap"></div>
+      <ul class="tasks" id="taskList"></ul>
+    </section>
+  </main>
+</div>
+<button class="fab" id="addBtn" aria-label="Add task">＋</button>
+<div class="modal" id="modal"><form class="panel glass" id="taskForm">
+  <h3>Add Task</h3>
+  <input name="title" placeholder="Title" required aria-label="Title" />
+  <textarea name="description" placeholder="Description"></textarea>
+  <div class="grid2"><select name="category"><option>Work</option><option>Health</option><option>Study</option><option>Personal</option></select><select name="priority"><option>Low</option><option selected>Medium</option><option>High</option></select></div>
+  <input type="datetime-local" name="dueDate" required />
+  <div class="grid2"><select name="recurring"><option>None</option><option>Daily</option><option>Weekly</option><option>Monthly</option></select><select name="goalType"><option>Short-term</option><option>Long-term</option></select></div>
+  <div class="row"><button type="button" id="cancel">Cancel</button><button type="submit">Save Task</button></div>
+</form></div>
+<script>
+const TASK_KEY='bounceback.tasks.v1', SET_KEY='bounceback.settings.v1';
+const now=()=>new Date();
+const state={tasks:JSON.parse(localStorage.getItem(TASK_KEY)||'[]'),settings:JSON.parse(localStorage.getItem(SET_KEY)||'{"theme":"dark"}'),filter:'all',view:'month'};
+const $=s=>document.querySelector(s); const $$=s=>document.querySelectorAll(s);
+if(state.settings.theme==='light')document.body.classList.add('light');
+const save=()=>{localStorage.setItem(TASK_KEY,JSON.stringify(state.tasks));localStorage.setItem(SET_KEY,JSON.stringify(state.settings));};
+const start=(d,u)=>new Date(d.getFullYear(),d.getMonth(),d.getDate()-u);
+const end=(d,u)=>new Date(d.getFullYear(),d.getMonth(),d.getDate()+u,23,59,59,999);
+const acc=(s,e)=>{const t=state.tasks.filter(x=>!x.archived&&new Date(x.dueDate)>=s&&new Date(x.dueDate)<=e);return t.length?Math.round((t.filter(x=>x.completed).length/t.length)*100):0};
+const metrics=()=>{const n=now(),day=acc(start(n,0),end(n,0)),week=acc(start(n,n.getDay()),end(n,6-n.getDay())),month=acc(new Date(n.getFullYear(),n.getMonth(),1),new Date(n.getFullYear(),n.getMonth()+1,0,23,59,59)),year=acc(new Date(n.getFullYear(),0,1),new Date(n.getFullYear(),11,31,23,59,59));
+let streak=0;for(let i=0;i<30;i++){const d=new Date(n);d.setDate(n.getDate()-i);const ds=state.tasks.filter(t=>!t.archived&&new Date(t.dueDate).toDateString()===d.toDateString());if(!ds.length||ds.some(t=>!t.completed))break;streak++;}
+return {day,week,month,year,streak,score:Math.min(100,Math.round(day*.2+week*.2+month*.25+year*.25+Math.min(streak*2,10)))} };
+function drawLine(canvas,data){const c=canvas.getContext('2d'),w=canvas.width=canvas.clientWidth,h=canvas.height=canvas.clientHeight;c.clearRect(0,0,w,h);c.strokeStyle='#8b5cf6';c.lineWidth=2;c.beginPath();data.forEach((v,i)=>{const x=(i/(data.length-1||1))*(w-20)+10,y=h-10-(v/100)*(h-20);i?c.lineTo(x,y):c.moveTo(x,y)});c.stroke();}
+function drawPie(canvas,done,pending){const c=canvas.getContext('2d'),w=canvas.width=canvas.clientWidth,h=canvas.height=canvas.clientHeight,r=Math.min(w,h)/3,total=Math.max(done+pending,1),x=w/2,y=h/2;c.clearRect(0,0,w,h);let a=-Math.PI/2;[[done,'#22c55e'],[pending,'#f97316']].forEach(([v,col])=>{c.beginPath();c.moveTo(x,y);c.fillStyle=col;c.arc(x,y,r,a,a+2*Math.PI*(v/total));c.fill();a+=2*Math.PI*(v/total)});}
+function drawBar(canvas,data){const c=canvas.getContext('2d'),w=canvas.width=canvas.clientWidth,h=canvas.height=canvas.clientHeight;c.clearRect(0,0,w,h);const max=Math.max(...data,1),bw=w/(data.length*1.5);data.forEach((v,i)=>{const bh=(v/max)*(h-20);c.fillStyle='#06b6d4';c.fillRect(i*bw*1.4+10,h-bh-8,bw,bh)})}
+function render(){
+  const m=metrics();
+  $('#metrics').innerHTML=[['Daily Accuracy',m.day+'%'],['Weekly Accuracy',m.week+'%'],['Monthly Accuracy',m.month+'%'],['Yearly Accuracy',m.year+'%'],['Streak',m.streak+' days'],['Productivity Score',m.score+'/100']].map(([k,v])=>`<article class='glass metric'><small>${k}</small><b>${v}</b></article>`).join('');
+  const days=[...Array(14)].map((_,i)=>{const d=new Date();d.setDate(d.getDate()-13+i);return acc(start(d,0),end(d,0));}); drawLine($('#lineChart'),days);
+  const done=state.tasks.filter(t=>t.completed&&!t.archived).length,pending=state.tasks.filter(t=>!t.completed&&!t.archived).length; drawPie($('#pieChart'),done,pending);
+  const bars=[...Array(7)].map((_,i)=>{const d=new Date();d.setDate(d.getDate()-6+i);return state.tasks.filter(t=>t.completed&&new Date(t.dueDate).toDateString()===d.toDateString()).length}); drawBar($('#barChart'),bars);
+  const hours=[...Array(24)].map((_,h)=>state.tasks.filter(t=>new Date(t.dueDate).getHours()===h).length); const peak=hours.indexOf(Math.max(...hours));
+  const week=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((l,i)=>({l,v:acc(start(new Date(),new Date().getDay()-i),end(new Date(),6-(new Date().getDay()-i)))})).sort((a,b)=>b.v-a.v)[0]?.l||'N/A';
+  $('#insights').innerHTML=`<h3>AI Productivity Insights</h3><p>Most productive day: <b>${week}</b></p><p>Peak working hour: <b>${String(peak).padStart(2,'0')}:00</b></p><p>Burnout warning: <b>${m.streak<2?'High risk':'Stable'}</b></p><p>Upcoming deadlines: <b>${state.tasks.filter(t=>!t.completed&&!t.archived&&new Date(t.dueDate)>now()).length}</b></p>`;
+  const h=$('#heatmap'); h.innerHTML=''; [...Array(35)].forEach((_,i)=>{const d=new Date();d.setDate(d.getDate()-34+i);const c=state.tasks.filter(t=>t.completed&&new Date(t.dueDate).toDateString()===d.toDateString()).length;const s=document.createElement('span');if(c)s.className='l'+Math.min(c,4);s.title=`${d.toDateString()} · ${c} completed`;h.appendChild(s)});
+  const limit={day:5,week:15,month:35,year:100}[state.view],ft=state.tasks.filter(t=>!t.archived&&(state.filter==='all'||(state.filter==='completed'&&t.completed)||(state.filter==='pending'&&!t.completed)||t.category===state.filter)).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).slice(0,limit);
+  $('#taskList').innerHTML=''; ft.forEach((t,i)=>{const li=document.createElement('li');li.draggable=true;li.dataset.id=t.id;li.innerHTML=`<div><b>${t.title}</b> <span class='tag'>${t.category}</span> <span class='tag'>${t.priority}</span><div style='opacity:.8;font-size:.85rem'>${new Date(t.dueDate).toLocaleString()} • ${t.goalType}</div></div><div><button data-a='done'>${t.completed?'Undo':'Complete'}</button> <button data-a='archive'>Archive</button></div>`;
+    li.querySelector('[data-a="done"]').onclick=()=>{t.completed=!t.completed;save();render()}; li.querySelector('[data-a="archive"]').onclick=()=>{t.archived=true;save();render()};
+    li.addEventListener('dragstart',()=>li.classList.add('drag')); li.addEventListener('dragend',()=>li.classList.remove('drag'));
+    li.addEventListener('dragover',e=>e.preventDefault()); li.addEventListener('drop',e=>{e.preventDefault();const from=state.tasks.findIndex(x=>x.id==$('.drag')?.dataset.id),to=state.tasks.findIndex(x=>x.id==li.dataset.id);if(from<0||to<0)return;const [mv]=state.tasks.splice(from,1);state.tasks.splice(to,0,mv);save();render()});
+    $('#taskList').appendChild(li);
+  });
+}
+$('#themeBtn').onclick=()=>{document.body.classList.toggle('light');state.settings.theme=document.body.classList.contains('light')?'light':'dark';save()};
+$('#filter').onchange=e=>{state.filter=e.target.value;render()}; $('#view').onchange=e=>{state.view=e.target.value;render()};
+$('#addBtn').onclick=()=>$('#modal').classList.add('open'); $('#cancel').onclick=()=>$('#modal').classList.remove('open');
+$('#taskForm').onsubmit=e=>{e.preventDefault();const fd=new FormData(e.target);const title=(fd.get('title')||'').trim(); if(!title)return; state.tasks.push({id:crypto.randomUUID(),title,description:fd.get('description')||'',category:fd.get('category'),priority:fd.get('priority'),dueDate:fd.get('dueDate'),recurring:fd.get('recurring'),goalType:fd.get('goalType'),completed:false,archived:false,createdAt:new Date().toISOString()}); save(); e.target.reset(); $('#modal').classList.remove('open'); render();};
+window.addEventListener('resize',render); window.addEventListener('keydown',e=>{if(e.key==='Escape')$('#modal').classList.remove('open')});
+render();
+</script>
+</body>
+</html>
